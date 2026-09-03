@@ -1,202 +1,175 @@
-# Demo: custom agents, subagents e handoffs
+# Demo: Agent Skills
 
-Este repositório demonstra um fluxo de revisão com capacidades limitadas sobre a
-aplicação **Training Catalog**, usando um agente de revisão e um pesquisador
-especializado.
+Este repositório demonstra como uma Agent Skill oferece um procedimento
+especializado e carrega recursos progressivamente. O cenário revisa uma
+migration do Entity Framework Core sem aplicá-la nem alterar o banco.
 
-O cenário usa o endpoint `GET /api/trainings/count`. O contrato exige resposta
-`200 OK` com a quantidade de treinamentos tanto para catálogo vazio quanto
-preenchido. A implementação cobre os dois casos, mas existe teste funcional
-somente para o catálogo preenchido. Essa lacuna permite que o revisor diferencie:
+## Cenário
 
-- comportamento comprovadamente incorreto;
-- critério atendido com evidência;
-- critério compatível com a implementação, mas sem evidência suficiente.
+A skill
+[`review-ef-migration`](.github/skills/review-ef-migration/SKILL.md) compara uma
+migration com entidade, configuração, model snapshot, especificação e
+limitações do SQLite.
 
-Nenhum defeito foi introduzido de propósito. A lacuna é exclusivamente de
-evidência automatizada e pode ser corrigida com um teste funcional pequeno.
+A candidata
+[`RiskyRenameDescriptionToSummary`](docs/demo-migrations/20260903000000_RiskyRenameDescriptionToSummary.cs)
+simula a troca de `Description` por `Summary` usando `DropColumn` e `AddColumn`.
+Ela é deliberadamente inadequada:
 
-## Custom agent, subagent e handoff
+- pode descartar as descrições existentes;
+- não expressa a intenção de renomeação;
+- diverge da entidade, da configuração e do snapshot;
+- o método `Down` recria a coluna antiga, mas não recupera os dados.
 
-| Recurso | Papel nesta demonstração |
+O arquivo fica em `docs/demo-migrations`, fora da compilação e da descoberta de
+migrations da aplicação. Ele existe somente para revisão estática.
+
+## Estrutura da skill
+
+```text
+.github/skills/review-ef-migration/
+├── SKILL.md
+├── checklist.md
+├── examples/
+│   └── risky-column-change.md
+└── scripts/
+    ├── inspect-migration.ps1
+    └── inspect-migration.sh
+```
+
+| Recurso | Responsabilidade |
 | --- | --- |
-| **Custom agent** | Define uma persona persistente, suas instruções, modelo, tools e agentes permitidos. O `Revisor da entrega` coordena e julga a revisão. |
-| **Subagent** | Executa uma investigação focada em contexto isolado e devolve um resumo ao coordenador. O `Pesquisador de critérios` relaciona especificação, implementação e testes. |
-| **Handoff** | Muda para o agente implementador e preenche a próxima solicitação. Não é execução paralela nem isolada e mantém uma decisão humana entre revisão e correção. |
+| `SKILL.md` | Metadata, condições de ativação e fluxo principal. |
+| `checklist.md` | Verificações detalhadas e identificadores citáveis. |
+| `risky-column-change.md` | Exemplo de `DropColumn` + `AddColumn` e perguntas para investigação. |
+| `inspect-migration.*` | Inspeção read-only de padrões relevantes. |
 
-O isolamento do subagent reduz o volume de investigação no contexto principal,
-mas cada chamada consome AI Credits e precisa receber tarefa e contexto
-autossuficientes. O agente principal continua responsável por avaliar se as
-evidências são suficientes.
+## Descoberta e carregamento progressivo
 
-## Arquivos relevantes
+O front matter ativo usa:
 
-| Arquivo | Finalidade |
+| Campo | Efeito |
 | --- | --- |
-| [`.github/agents/revisor-entrega.md`](.github/agents/revisor-entrega.md) | Agente principal read-only que delega a pesquisa, executa validação focada e consolida o relatório. |
-| [`.github/agents/pesquisador-criterios.md`](.github/agents/pesquisador-criterios.md) | Subagente oculto da seleção manual, limitado a leitura e busca. |
-| [`docs/specs/training-catalog-vertical-slice.md`](docs/specs/training-catalog-vertical-slice.md) | Contrato e critérios de aceitação, incluindo a contagem do catálogo. |
-| [`src/Api/Program.cs`](src/Api/Program.cs) | Implementação do endpoint de contagem. |
-| [`src/Tests/Api.Tests/TrainingCountTests.cs`](src/Tests/Api.Tests/TrainingCountTests.cs) | Evidência do caso com catálogo preenchido; não cobre catálogo vazio. |
+| `name` | Coincide com o diretório `review-ef-migration`. |
+| `description` | Informa o que revisar e quando carregar a skill. |
+| `argument-hint: "[caminho da migration]"` | Mostra a entrada esperada na invocação manual. |
+| `user-invocable: true` | Disponibiliza a skill para invocação manual. Quando `false`, oculta essa opção. O padrão é `true`. |
+| `disable-model-invocation: false` | Permite descoberta automática por relevância. Quando `true`, impede a ativação automática. O padrão é `false`. |
 
-## Configuração dos agentes
+Uma descrição vaga como `Ajuda com migrations` oferece poucos sinais para
+descoberta. A descrição ativa cita EF Core, riscos para dados, entidade,
+snapshot e SQLite.
 
-### Revisor da entrega
+O progressive disclosure ocorre em três níveis:
 
-O revisor aparece no seletor e não possui tools de criação, edição ou exclusão.
+1. `name` e `description` ficam disponíveis para descoberta.
+2. O corpo de `SKILL.md` é carregado quando a tarefa corresponde.
+3. Checklist, exemplo e scripts são consultados somente quando necessários.
 
-| Campo | Configuração e efeito |
-| --- | --- |
-| `name` | Nome exibido: `Revisor da entrega`. |
-| `description` | Explica quando usar o agente e seu caráter read-only. |
-| `argument-hint` | Orienta a entrada esperada no chat. |
-| `target` | Restringe a definição ao VS Code. |
-| `model` | Define um modelo preferencial; a disponibilidade depende do plano e das políticas. |
-| `tools` | Disponibiliza `read`, `search`, `execute` e `agent`. |
-| `agents` | Permite somente `Pesquisador de critérios` como subagent. |
-| `user-invocable` | `true`, portanto o revisor aparece para seleção manual. |
-| `disable-model-invocation` | `true`, evitando que outros agentes o escolham implicitamente como subagent. |
-| `handoffs` | Oferece `Corrigir lacunas` para o agente implementador, com `send: false`. |
+`context: fork` não é usado porque a demo observa o carregamento no contexto
+principal. `allowed-tools` também não é usado: seu suporte é experimental e não
+deve ser apresentado como permissão de execução.
 
-A tool `agent` é necessária para invocar subagents. `execute` permite somente
-as validações definidas pelas instruções do revisor; ela não transforma o agente
-em editor, mas comandos de terminal ainda exigem revisão humana. Um conjunto
-read-only reduz o risco de alterações acidentais, porém não elimina riscos de
-comandos, interpretação incorreta ou exposição indevida de dados.
-
-### Pesquisador de critérios
-
-O pesquisador tem uma única responsabilidade: extrair critérios e localizar
-evidências. Ele não decide se a entrega deve ser aprovada.
-
-| Campo | Configuração e efeito |
-| --- | --- |
-| `tools` | Somente `read` e `search`; não há terminal nem edição. |
-| `agents` | Lista vazia, impedindo nova delegação. |
-| `user-invocable` | `false`, ocultando o agente do seletor manual. |
-| `disable-model-invocation` | `false`, permitindo que o coordenador autorizado o invoque. |
-
-Cada invocação é independente. Por isso, o revisor deve informar a alteração,
-a especificação aplicável, os caminhos relevantes e o formato esperado.
-
-## Executar a demonstração no VS Code
+## Executar a demo no VS Code
 
 Use uma versão atualizada do VS Code com GitHub Copilot e abra a raiz do
 repositório em Codespaces.
 
 1. Execute **Chat: Open Customizations** na Command Palette.
-2. Abra **Agents** e inspecione os dois arquivos em `.github/agents`.
-3. Confirme que `Revisor da entrega` aparece no seletor de agentes.
-4. Confirme que `Pesquisador de critérios` não aparece para seleção manual.
-5. Selecione `Revisor da entrega` e envie:
+2. Abra **Skills** e selecione `review-ef-migration`.
+3. Digite `/review-ef-migration` e observe o `argument-hint`, sem enviar o
+   comando; os prompts seguintes demonstram a descoberta automática.
+4. Inicie um chat novo para cada prompt abaixo.
+5. Expanda as leituras exibidas no chat. Se a origem não estiver visível, use o
+   Agent Debug Log.
 
-> Revise a implementação de `GET /api/trainings/count` contra a especificação.
-> Delegue o levantamento dos critérios e das evidências ao subagente permitido.
-> Execute somente a validação focada necessária e não altere arquivos.
+### 1. Tarefa não relacionada
 
-Quando o revisor solicitar a tool de terminal, confira o comando na confirmação
-nativa do VS Code e autorize apenas o teste focado que deseja observar. O agente
-não deve abrir uma etapa conversacional separada apenas para pedir aprovação,
-pois isso faria o handoff aparecer antes do relatório final.
+> Explique como o endpoint de contagem calcula o total de treinamentos. Não
+> altere arquivos.
 
-## O que observar
+Observe que a skill de migration não é necessária e seus recursos não devem ser
+consultados.
 
-1. Expanda a chamada do subagent e confira o nome `Pesquisador de critérios`.
-2. Inspecione o prompt recebido pelo subagent e confirme que contém contexto
-   suficiente sem depender de todo o histórico do chat principal.
-3. Confira que as únicas tools do pesquisador são leitura e busca.
-4. Observe o resumo relacionando especificação, endpoint e teste funcional.
-5. Confirme que o revisor faz seu próprio julgamento depois da delegação.
-6. Inspecione o comando de teste focado e seu resultado.
-7. Verifique no painel **Source Control** que a revisão não alterou arquivos.
-8. Ao fim da resposta, localize o handoff **Corrigir lacunas**.
-9. Selecione o handoff e confirme que o agente muda e o prompt é preenchido,
-   mas não enviado automaticamente.
+### 2. Tarefa relevante
 
-As chamadas de subagents aparecem como seções expansíveis. A apresentação, os
-rótulos e o nível de detalhe podem variar entre versões do VS Code.
+> Revise a migration candidata em
+> `docs/demo-migrations/20260903000000_RiskyRenameDescriptionToSummary.cs`.
+> Identifique riscos para dados existentes e para SQLite. Não aplique a
+> migration nem altere arquivos.
 
-## Interpretar o relatório
+Observe a descoberta da skill, seguida pela leitura de `SKILL.md`, da checklist
+e do exemplo conforme a necessidade.
 
-O revisor organiza cada critério em:
+### 3. Recurso executável
 
-1. **Atendido**: implementação e evidência reproduzível sustentam o critério.
-2. **Não atendido**: há evidência de comportamento contrário ao contrato.
-3. **Não foi possível comprovar**: não há evidência suficiente para concluir,
-   mesmo que a implementação pareça compatível.
+> Depois de escolher e ler o script compatível com o ambiente, use-o somente
+> para inspecionar estaticamente a migration candidata e relacione os sinais
+> encontrados à checklist. Não aplique a migration nem altere arquivos.
 
-Para esta entrega, o teste com catálogo preenchido deve sustentar a contagem
-positiva. O caso de catálogo vazio exige teste funcional segundo a especificação,
-mas não está coberto; portanto, a ausência não deve ser relatada automaticamente
-como defeito do endpoint.
+Antes de aprovar a execução, abra o script escolhido. A versão Bash usa apenas
+`grep` e `awk`; a PowerShell usa `Get-Content` e expressões regulares. Nenhuma
+versão executa `dotnet ef`, escreve arquivos, cria banco, acessa rede ou instala
+dependências.
 
-## Inspecionar tools e restrições
+No Codespace:
 
-No chat, use **Configure Tools** para visualizar as tools ativas. No editor de
-customizações, compare o front matter dos agentes:
+```bash
+bash .github/skills/review-ef-migration/scripts/inspect-migration.sh \
+  docs/demo-migrations/20260903000000_RiskyRenameDescriptionToSummary.cs
+```
 
-- o revisor tem `execute` e `agent`, mas não tem edição;
-- o pesquisador tem somente `read` e `search`;
-- `agents` limita o revisor ao pesquisador;
-- `agents: []` impede subagents aninhados no pesquisador.
+No PowerShell:
 
-Se uma tool declarada não existir na versão instalada, o VS Code pode ignorá-la.
-Confirme os nomes disponíveis no picker antes de apresentar a demonstração.
+```powershell
+& .github/skills/review-ef-migration/scripts/inspect-migration.ps1 `
+  docs/demo-migrations/20260903000000_RiskyRenameDescriptionToSummary.cs
+```
 
-## Handoff para correção
+As duas versões devem localizar `DropColumn` e `AddColumn`. As correspondências
+são sinais para revisão humana, não conclusões. Código `0` indica inspeção
+concluída, `64` uso inválido e `66` arquivo indisponível; a versão Bash também
+usa `69` quando `grep` ou `awk` não existe.
 
-O handoff **Corrigir lacunas** aponta para o agente implementador local e limita
-o prompt aos itens classificados como **Não atendido** ou
-**Não foi possível comprovar**. Ele também exige preservar contratos e executar
-os testes indicados.
+## Confirmar que nada foi aplicado
 
-`send: false` é intencional: selecionar o botão apenas prepara a próxima etapa.
-O usuário pode revisar, ajustar ou cancelar o prompt antes de autorizar qualquer
-edição. Isso distingue uma transição guiada de uma delegação isolada.
+Não execute `dotnet ef database update` e não mova a candidata para
+`src/Infrastructure/Migrations`.
 
-## Repetir ou restaurar o estado
+Antes e depois da demo, confira o painel **Source Control** ou execute:
 
-A revisão read-only não deve produzir mudanças. Para repeti-la, abra um chat
-novo, selecione o revisor e envie novamente a solicitação copiável.
+```bash
+git diff --exit-code -- \
+  src/Infrastructure/TrainingEntity.cs \
+  src/Infrastructure/TrainingCatalogDbContext.cs \
+  src/Infrastructure/Migrations \
+  src/Api/training-catalog.db
+```
 
-Se o handoff for enviado e gerar alterações, revise o diff no painel
-**Source Control** e descarte somente os arquivos produzidos nessa execução.
-Não descarte os agentes, a especificação, o endpoint nem o teste preparado que
-compõem esta demonstração.
+## Validar o repositório
 
-## Validação do repositório
-
-Os comandos documentados são:
-
-```text
+```bash
 dotnet build src/TrainingCatalog.slnx
 dotnet test src/TrainingCatalog.slnx
 ```
 
-Para executar apenas a evidência preparada para contagem:
+## Limitações e segurança
 
-```text
-dotnet test src/Tests/Api.Tests/TrainingCatalog.Api.Tests.csproj --filter FullyQualifiedName~TrainingCountTests
-```
-
-## Limitações
-
-- Subagents consomem AI Credits adicionais; o custo depende do modelo e do plano.
-- Modelo, tools, campos de front matter e interface variam conforme versão,
-  assinatura, extensões instaladas e políticas da organização.
-- O modelo principal decide como usar tools; instruções explícitas tornam a
-  delegação mais consistente, mas não garantem saídas idênticas.
-- Restrições de tools implementam menor privilégio, mas não substituem revisão
-  humana de comandos, evidências e conclusões.
-- Handoffs são uma conveniência de fluxo, não uma aprovação automática.
-- A demonstração foi preparada para VS Code; outras superfícies têm matrizes de
-  suporte diferentes.
+- A seleção da skill e a ordem exata das leituras são decisões do modelo e
+  podem variar entre execuções.
+- Interface, logs e suporte a campos podem variar entre versões e superfícies.
+- A versão `.sh` requer Bash, `grep` e `awk`; a `.ps1` requer PowerShell.
+- Skills de terceiros podem conter instruções enganosas ou scripts destrutivos.
+  Revise origem e conteúdo antes de instalar ou executar.
+- Recursos separados deixam de ocupar o contexto antes da necessidade, mas esta
+  demo não mede nem promete uma redução exata de tokens.
 
 ## Referências
 
 Documentação consultada em **3 de setembro de 2026**:
 
-- [Custom agents no VS Code](https://code.visualstudio.com/docs/agent-customization/custom-agents)
-- [Subagents no VS Code](https://code.visualstudio.com/docs/agents/run/subagents)
-- [Tools de agentes no VS Code](https://code.visualstudio.com/docs/agents/run/tools)
-- [Cheat sheet de customizações do GitHub Copilot](https://docs.github.com/en/copilot/reference/customization-cheat-sheet)
+- [Agent Skills no VS Code](https://code.visualstudio.com/docs/agent-customization/agent-skills)
+- [Agent Skills no GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills)
+- [Especificação aberta de Agent Skills](https://agentskills.io/specification)
+- [Cheat sheet de customizações](https://docs.github.com/en/copilot/reference/customization-cheat-sheet)
+- [Limitações do SQLite no EF Core](https://learn.microsoft.com/ef/core/providers/sqlite/limitations)
