@@ -79,7 +79,7 @@ repositório em Codespaces.
 2. Abra **Skills** e selecione `review-ef-migration`.
 3. Digite `/review-ef-migration` e observe o `argument-hint`, sem enviar o
    comando; os prompts seguintes demonstram a descoberta automática.
-4. Inicie um chat novo para cada prompt abaixo.
+4. Use um chat novo para cada prompt.
 5. Expanda as leituras exibidas no chat. Se a origem não estiver visível, use o
    Agent Debug Log.
 
@@ -98,16 +98,21 @@ consultados.
 > Identifique riscos para dados existentes e para SQLite. Não aplique a
 > migration nem altere arquivos.
 
-Observe a descoberta da skill, seguida pela leitura de `SKILL.md`, da checklist
-e do exemplo conforme a necessidade.
+Observe a descoberta da skill, seguida pela leitura de `SKILL.md`. A revisão
+inclui a inspeção estática com o recurso adequado ao ambiente, além da checklist
+e do exemplo conforme as operações encontradas.
 
 ### 3. Recurso executável
 
-> Depois de escolher e ler o script compatível com o ambiente, use-o somente
-> para inspecionar estaticamente a migration candidata e relacione os sinais
-> encontrados à checklist. Não aplique a migration nem altere arquivos.
+Durante a execução do passo 2, observe se o agente:
 
-Antes de aprovar a execução, abra o script escolhido. A versão Bash usa apenas
+1. consulta a seção de inspeção da skill;
+2. escolhe a versão Bash no Codespace ou PowerShell no Windows;
+3. lê o recurso antes de solicitar sua execução;
+4. apresenta uma chamada de terminal sujeita à aprovação normal;
+5. combina a saída com os demais artefatos da revisão.
+
+Antes de aprovar, expanda a leitura e confira o comando. A versão Bash usa apenas
 `grep` e `awk`; a PowerShell usa `Get-Content` e expressões regulares. Nenhuma
 versão executa `dotnet ef`, escreve arquivos, cria banco, acessa rede ou instala
 dependências.
